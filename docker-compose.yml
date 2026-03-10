@@ -1,0 +1,10 @@
+services:
+  inkstation:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./inkstation-data:/app/inkstation-data
+    environment:
+      - DATA_DIR=/app/inkstation-data
+    restart: unless-stopped

@@ -1,0 +1,32 @@
+:root {
+  --font-mono: "GenJyuuGothic Monospace", "Noto Sans Mono CJK JP", monospace;
+  --color-bg: #fffef5;
+  --color-text: #1a1a1a;
+  --color-line: #c5d4e8;
+  --color-margin: #e87070;
+  --color-accent: #4a90d9;
+  --color-offline: #d32f2f;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: var(--font-mono);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  touch-action: none;
+}
+
+#app {
+  height: 100%;
+}
