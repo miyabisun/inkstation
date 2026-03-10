@@ -1,5 +1,7 @@
 # InkStation
 
+[日本語版 / Japanese](README.ja.md)
+
 A handwritten bullet journal web application. Write your daily tasks and notes with a stylus — InkStation handles OCR and organizes everything as a digital bullet journal.
 
 ## What is a Bullet Journal?
