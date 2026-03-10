@@ -78,8 +78,11 @@ export const pageStore = {
         }
         break;
       }
-      case "ocr-result": {
+      case "row-edited": {
         pendingIds.delete(msg.id);
+        break;
+      }
+      case "ocr-result": {
         if (currentPage && msg.date === currentPage.date) {
           const rows = updateRowRecursive(currentPage.rows, msg.rowId, (r) => ({
             ...r,

@@ -20,7 +20,6 @@ export interface StrokePoint {
 export interface Row {
   id: number;
   bullet: BulletSymbol;
-  status: RowStatus;
   ocr_text: string;
   children: Row[];
 }
@@ -58,6 +57,7 @@ export type ServerMessage =
   | { type: "pong" }
   | { type: "page"; date: string; page: Page }
   | { type: "row-created"; id: string; date: string; row: Row }
+  | { type: "row-edited"; id: string; date: string; rowId: number }
   | { type: "ocr-result"; id: string; date: string; rowId: number; action: Action; ocrText: string }
   | { type: "page-updated"; id: string; date: string }
   | { type: "error"; id?: string; message: string };

@@ -60,7 +60,8 @@ class WsClient {
       let msg: ServerMessage;
       try {
         msg = JSON.parse(event.data);
-      } catch {
+      } catch (e) {
+        console.warn("Failed to parse WebSocket message:", e);
         return;
       }
       if (msg.type === "pong") {
@@ -185,7 +186,8 @@ class WsClient {
       const raw = localStorage.getItem(QUEUE_KEY);
       if (!raw) return [];
       return JSON.parse(raw);
-    } catch {
+    } catch (e) {
+      console.warn("Failed to read message queue:", e);
       return [];
     }
   }
@@ -193,8 +195,8 @@ class WsClient {
   private setQueue(queue: MutatingMessage[]) {
     try {
       localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
-    } catch {
-      // localStorage quota exceeded — drop oldest entries and retry
+    } catch (e) {
+      console.warn("localStorage write failed, trimming queue:", e);
       if (queue.length > 1) {
         this.setQueue(queue.slice(Math.ceil(queue.length / 2)));
       }

@@ -3,10 +3,14 @@ import { serveStatic } from "hono/bun";
 import { PageStorage } from "./storage";
 import { HistoryLog } from "./history";
 import { handleWsMessage } from "./ws";
+import { PageMutex } from "./mutex";
+import { IdempotencyCache } from "./idempotency";
 
 const DATA_DIR = process.env.DATA_DIR || "./inkstation-data";
 const storage = new PageStorage(DATA_DIR);
 const history = new HistoryLog(`${DATA_DIR}/history.db`);
+const mutex = new PageMutex();
+const cache = new IdempotencyCache();
 
 const app = new Hono();
 app.get("/*", serveStatic({ root: "./dist" }));
@@ -26,11 +30,11 @@ Bun.serve({
   },
   websocket: {
     message(ws, message) {
-      handleWsMessage(ws, String(message), storage, history).catch((err) => {
+      handleWsMessage(ws, String(message), storage, history, mutex, cache).catch((err) => {
         console.error("WebSocket message handler error:", err);
         try {
           ws.send(JSON.stringify({ type: "error", message: "Internal server error" }));
-        } catch { /* ws may be closed */ }
+        } catch (e) { console.error("Failed to send error response (ws closed?):", e); }
       });
     },
     open(ws) {

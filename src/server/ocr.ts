@@ -11,7 +11,8 @@ async function checkTools(): Promise<boolean> {
     const resvg = Bun.which("resvg");
     const ndlocr = Bun.which("ndlocr");
     toolsAvailable = resvg !== null && ndlocr !== null;
-  } catch {
+  } catch (e) {
+    console.error("Failed to check OCR tools:", e);
     toolsAvailable = false;
   }
 
@@ -27,7 +28,8 @@ export async function parseNdlocrOutput(outputDir: string): Promise<string> {
   let entries: string[];
   try {
     entries = await readdir(outputDir, { recursive: true }) as unknown as string[];
-  } catch {
+  } catch (e) {
+    console.error("Failed to read OCR output directory:", e);
     return "";
   }
 
@@ -116,6 +118,6 @@ export async function recognizeText(svgContent: Buffer): Promise<string> {
 
     return await parseNdlocrOutput(ocrOutputDir);
   } finally {
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    await rm(tempDir, { recursive: true, force: true }).catch((e) => console.error("Failed to clean up OCR temp dir:", e));
   }
 }

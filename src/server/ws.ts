@@ -1,17 +1,17 @@
 import type { ServerWebSocket } from "bun";
-import { PageStorage, DATE_RE, VALID_ACTIONS } from "./storage";
+import { PageStorage, VALID_ACTIONS } from "./storage";
 import { HistoryLog } from "./history";
 import { recognizeText } from "./ocr";
+import { PageMutex } from "./mutex";
+import { IdempotencyCache } from "./idempotency";
+import { validateDate, validatePage, VALID_BULLETS } from "./validation";
 import type {
   ServerMessage,
   Row,
   BulletSymbol,
   Action,
 } from "$shared/types";
-import { BULLET_STATUS, updateRowRecursive } from "$shared/types";
 
-const VALID_BULLETS = new Set<string>(["·", "×", "-", ">", "o"]);
-const VALID_STATUSES = new Set<string>(["open", "done", "note", "migrated", "event"]);
 const MAX_SVG_LENGTH = 2 * 1024 * 1024; // 2MB base64
 
 function send(ws: ServerWebSocket, msg: ServerMessage): void {
@@ -27,59 +27,33 @@ function findRow(rows: Row[], rowId: number): Row | null {
   return null;
 }
 
-function validateDate(date: unknown): date is string {
-  if (typeof date !== "string" || !DATE_RE.test(date)) return false;
-  const d = new Date(date + "T00:00:00Z");
-  return !isNaN(d.getTime()) && d.toISOString().startsWith(date);
-}
-
-const MAX_ROW_DEPTH = 3;
-
-function validateRow(row: unknown, depth = 0): row is Row {
-  if (depth > MAX_ROW_DEPTH) return false;
-  if (typeof row !== "object" || row === null) return false;
-  const r = row as Record<string, unknown>;
-  return (
-    typeof r.id === "number" &&
-    typeof r.bullet === "string" &&
-    VALID_BULLETS.has(r.bullet) &&
-    typeof r.status === "string" &&
-    VALID_STATUSES.has(r.status) &&
-    typeof r.ocr_text === "string" &&
-    Array.isArray(r.children) &&
-    r.children.every((c: unknown) => validateRow(c, depth + 1))
-  );
-}
-
-function validatePage(page: unknown, date: string): page is { date: string; next_row_id: number; rows: Row[] } {
-  if (typeof page !== "object" || page === null) return false;
-  const p = page as Record<string, unknown>;
-  return (
-    p.date === date &&
-    typeof p.next_row_id === "number" &&
-    Number.isInteger(p.next_row_id) &&
-    p.next_row_id >= 1 &&
-    Array.isArray(p.rows) &&
-    p.rows.every(validateRow)
-  );
-}
-
 export async function handleWsMessage(
   ws: ServerWebSocket,
   message: string,
   storage: PageStorage,
   history: HistoryLog,
+  mutex: PageMutex,
+  cache: IdempotencyCache,
 ): Promise<void> {
   let msg: Record<string, unknown>;
   try {
     msg = JSON.parse(message);
-  } catch {
+  } catch (e) {
+    console.error("Failed to parse WebSocket message:", e);
     send(ws, { type: "error", message: "Invalid JSON" });
     return;
   }
 
   if (typeof msg !== "object" || msg === null || typeof msg.type !== "string") {
     send(ws, { type: "error", message: "Missing message type" });
+    return;
+  }
+
+  // Idempotency check for mutating messages
+  const msgId = typeof msg.id === "string" ? msg.id : null;
+  if (msgId && cache.has(msgId)) {
+    const cached = cache.get(msgId) as ServerMessage;
+    send(ws, cached);
     return;
   }
 
@@ -136,52 +110,58 @@ export async function handleWsMessage(
         return;
       }
 
-      let page = await storage.loadPage(date);
-      if (!page) {
-        page = { date, next_row_id: 1, rows: [] };
-      }
-
-      const newRow: Row = {
-        id: page.next_row_id,
-        bullet: bullet as BulletSymbol,
-        status: BULLET_STATUS[bullet as BulletSymbol],
-        ocr_text: "",
-        children: [],
-      };
-      page.next_row_id++;
-
-      if (indent === 0) {
-        page.rows.push(newRow);
-      } else if (indent === 1) {
-        if (page.rows.length > 0) {
-          page.rows[page.rows.length - 1].children.push(newRow);
-        } else {
-          page.rows.push(newRow);
+      const release = await mutex.acquire(date);
+      try {
+        let page = await storage.loadPage(date);
+        if (!page) {
+          page = { date, next_row_id: 1, rows: [] };
         }
-      } else if (indent === 2) {
-        if (page.rows.length > 0) {
-          const lastRoot = page.rows[page.rows.length - 1];
-          if (lastRoot.children.length > 0) {
-            lastRoot.children[lastRoot.children.length - 1].children.push(
-              newRow,
-            );
+
+        const newRow: Row = {
+          id: page.next_row_id,
+          bullet: bullet as BulletSymbol,
+          ocr_text: "",
+          children: [],
+        };
+        page.next_row_id++;
+
+        if (indent === 0) {
+          page.rows.push(newRow);
+        } else if (indent === 1) {
+          if (page.rows.length > 0) {
+            page.rows[page.rows.length - 1].children.push(newRow);
           } else {
-            lastRoot.children.push(newRow);
+            page.rows.push(newRow);
           }
-        } else {
-          page.rows.push(newRow);
+        } else if (indent === 2) {
+          if (page.rows.length > 0) {
+            const lastRoot = page.rows[page.rows.length - 1];
+            if (lastRoot.children.length > 0) {
+              lastRoot.children[lastRoot.children.length - 1].children.push(
+                newRow,
+              );
+            } else {
+              lastRoot.children.push(newRow);
+            }
+          } else {
+            page.rows.push(newRow);
+          }
         }
+
+        const pageYaml = await storage.savePage(date, page);
+        history.appendLog(
+          date,
+          "create-row",
+          { rowId: newRow.id, bullet, indent },
+          pageYaml,
+        );
+
+        const response: ServerMessage = { type: "row-created", id, date, row: newRow };
+        cache.set(id, response);
+        send(ws, response);
+      } finally {
+        release();
       }
-
-      const pageYaml = await storage.savePage(date, page);
-      history.appendLog(
-        date,
-        "create-row",
-        { rowId: newRow.id, bullet, indent },
-        pageYaml,
-      );
-
-      send(ws, { type: "row-created", id, date, row: newRow });
       break;
     }
 
@@ -217,50 +197,74 @@ export async function handleWsMessage(
         return;
       }
 
-      const page = await storage.loadPage(date);
-      if (!page) {
-        send(ws, { type: "error", id, message: `Page not found: ${date}` });
-        return;
+      const release = await mutex.acquire(date);
+      let page: Awaited<ReturnType<PageStorage["loadPage"]>>;
+      try {
+        page = await storage.loadPage(date);
+        if (!page) {
+          send(ws, { type: "error", id, message: `Page not found: ${date}` });
+          return;
+        }
+
+        const row = findRow(page.rows, rowId);
+        if (!row) {
+          send(ws, { type: "error", id, message: `Row not found: ${rowId}` });
+          return;
+        }
+
+        const svgBuffer = Buffer.from(svg, "base64");
+        await storage.saveSvg(date, rowId, action, svgBuffer);
+
+        // Send immediate ACK
+        const ackResponse: ServerMessage = { type: "row-edited", id, date, rowId };
+        cache.set(id, ackResponse);
+        send(ws, ackResponse);
+
+        // Fire-and-forget OCR
+        const capturedAction = action as Action;
+        const capturedPosition = msg.position;
+        recognizeText(svgBuffer)
+          .then(async (ocrText) => {
+            const innerRelease = await mutex.acquire(date);
+            try {
+              const freshPage = await storage.loadPage(date);
+              if (!freshPage) return;
+              const freshRow = findRow(freshPage.rows, rowId);
+              if (!freshRow) return;
+
+              if (capturedAction === "add") {
+                freshRow.ocr_text = ocrText;
+              } else if (capturedAction === "insert") {
+                const rawPos = capturedPosition;
+                const pos =
+                  typeof rawPos === "number" && Number.isInteger(rawPos) && rawPos >= 0
+                    ? rawPos
+                    : freshRow.ocr_text.length;
+                freshRow.ocr_text =
+                  freshRow.ocr_text.slice(0, pos) + ocrText + freshRow.ocr_text.slice(pos);
+              }
+
+              const editPageYaml = await storage.savePage(date, freshPage);
+              history.appendLog(date, "edit-row", { rowId, action: capturedAction }, editPageYaml);
+
+              try {
+                send(ws, {
+                  type: "ocr-result",
+                  id,
+                  date,
+                  rowId,
+                  action: capturedAction,
+                  ocrText,
+                });
+              } catch (e) { console.error("Failed to send ocr-result (ws closed?):", e); }
+            } finally {
+              innerRelease();
+            }
+          })
+          .catch(console.error);
+      } finally {
+        release();
       }
-
-      const row = findRow(page.rows, rowId);
-      if (!row) {
-        send(ws, { type: "error", id, message: `Row not found: ${rowId}` });
-        return;
-      }
-
-      const svgBuffer = Buffer.from(svg, "base64");
-      await storage.saveSvg(date, rowId, action, svgBuffer);
-
-      const ocrText = await recognizeText(svgBuffer);
-
-      if (action === "add") {
-        row.ocr_text = ocrText;
-      } else if (action === "insert") {
-        const rawPos = msg.position;
-        const pos = typeof rawPos === "number" && Number.isInteger(rawPos) && rawPos >= 0
-          ? rawPos
-          : row.ocr_text.length;
-        row.ocr_text =
-          row.ocr_text.slice(0, pos) + ocrText + row.ocr_text.slice(pos);
-      }
-
-      const editPageYaml = await storage.savePage(date, page);
-      history.appendLog(
-        date,
-        "edit-row",
-        { rowId, action },
-        editPageYaml,
-      );
-
-      send(ws, {
-        type: "ocr-result",
-        id,
-        date,
-        rowId,
-        action: action as Action,
-        ocrText,
-      });
       break;
     }
 
@@ -280,17 +284,19 @@ export async function handleWsMessage(
         send(ws, { type: "error", id, message: "Invalid page data" });
         return;
       }
-      const page = msg.page;
 
-      const updatePageYaml = await storage.savePage(date, page);
-      history.appendLog(
-        date,
-        "update-page",
-        null,
-        updatePageYaml,
-      );
+      const release = await mutex.acquire(date);
+      try {
+        const page = msg.page;
+        const updatePageYaml = await storage.savePage(date, page);
+        history.appendLog(date, "update-page", null, updatePageYaml);
 
-      send(ws, { type: "page-updated", id, date });
+        const response: ServerMessage = { type: "page-updated", id, date };
+        cache.set(id, response);
+        send(ws, response);
+      } finally {
+        release();
+      }
       break;
     }
 

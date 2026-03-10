@@ -1,8 +1,13 @@
 import * as yaml from "js-yaml";
 import { readdir, mkdir } from "node:fs/promises";
 import type { Page, Action } from "$shared/types";
+import { validatePage, DATE_RE } from "./validation";
 
-export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isEnoent(e: unknown): boolean {
+  return e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+export { DATE_RE };
 export const VALID_ACTIONS: ReadonlySet<string> = new Set<Action>(["add", "insert"]);
 
 export class PageStorage {
@@ -17,7 +22,8 @@ export class PageStorage {
     let entries: string[];
     try {
       entries = await readdir(this.dataDir);
-    } catch {
+    } catch (e) {
+      if (!isEnoent(e)) console.error("Failed to read data directory:", e);
       return [];
     }
 
@@ -38,8 +44,11 @@ export class PageStorage {
 
     try {
       const text = await Bun.file(`${this.dataDir}/${date}/page.yaml`).text();
-      return yaml.load(text, { schema: yaml.JSON_SCHEMA }) as Page;
-    } catch {
+      const data = yaml.load(text, { schema: yaml.JSON_SCHEMA });
+      if (!validatePage(data, date)) return null;
+      return data;
+    } catch (e) {
+      if (!isEnoent(e)) console.error(`Failed to load page ${date}:`, e);
       return null;
     }
   }
@@ -89,7 +98,8 @@ export class PageStorage {
     let entries: string[];
     try {
       entries = await readdir(pageDir);
-    } catch {
+    } catch (e) {
+      if (!isEnoent(e)) console.error("Failed to read page directory for seq:", e);
       return 0;
     }
 

@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import type { Row, ServerMessage } from "$client/lib/types";
-  import { BULLET_STATUS, updateRowRecursive, type BulletSymbol } from "$client/lib/types";
+  import { updateRowRecursive, type BulletSymbol } from "$client/lib/types";
   import { pageStore, MAX_ROWS } from "$client/lib/stores/page.svelte";
   import { undoStore } from "$client/lib/stores/undo.svelte";
   import { connectionStore } from "$client/lib/stores/connection.svelte";
@@ -82,7 +82,6 @@
     const updatedRows = updateRowRecursive(page.rows, row.id, (r) => ({
       ...r,
       bullet: nextBullet,
-      status: BULLET_STATUS[nextBullet],
     }));
     pageStore.updatePage(currentDate, { ...page, rows: updatedRows }, send);
   }
@@ -113,9 +112,10 @@
 
     if (msg.type === "page-list") {
       noteDates = msg.dates;
+    } else if (msg.type === "row-edited") {
+      wsClient.acknowledge(msg.id);
     } else if (msg.type === "ocr-result") {
       ocrWaitingRows.delete(msg.rowId);
-      wsClient.acknowledge(msg.id);
     } else if (msg.type === "row-created") {
       wsClient.acknowledge(msg.id);
     } else if (msg.type === "page-updated") {
@@ -214,8 +214,8 @@
     {#if loading}
       <div class="loading">読み込み中...</div>
     {:else if page}
-      {#each page.rows as row (row.id)}
-        <div class="row-container">
+      {#snippet renderRow(row: Row, indent: number)}
+        <div class="row-container" style:margin-left="{indent * 30}px">
           <BulletArea
             bullet={row.bullet}
             onclassified={() => handleBulletClick(row)}
@@ -240,6 +240,13 @@
             {/if}
           </div>
         </div>
+        {#each row.children as child (child.id)}
+          {@render renderRow(child, indent + 1)}
+        {/each}
+      {/snippet}
+
+      {#each page.rows as row (row.id)}
+        {@render renderRow(row, 0)}
       {/each}
 
       {#if page.rows.length < MAX_ROWS}
