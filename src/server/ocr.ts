@@ -9,7 +9,7 @@ async function checkTools(): Promise<boolean> {
 
   try {
     const resvg = Bun.which("resvg");
-    const ndlocr = Bun.which("ndlocr");
+    const ndlocr = Bun.which("ndlocr-lite");
     toolsAvailable = resvg !== null && ndlocr !== null;
   } catch (e) {
     console.error("Failed to check OCR tools:", e);
@@ -56,7 +56,7 @@ export async function parseNdlocrOutput(outputDir: string): Promise<string> {
 }
 
 /**
- * Convert SVG content to text via resvg (SVG->PNG) and ndlocr (OCR).
+ * Convert SVG content to text via resvg (SVG->PNG) and ndlocr-lite (OCR).
  * Returns empty string if tools are not installed.
  */
 export async function recognizeText(svgContent: Buffer): Promise<string> {
@@ -96,8 +96,8 @@ export async function recognizeText(svgContent: Buffer): Promise<string> {
       return "";
     }
 
-    // Run ndlocr: PNG -> OCR output
-    const ndlocrProc = Bun.spawn(["ndlocr", pngPath, "-o", ocrOutputDir], {
+    // Run ndlocr-lite: PNG -> OCR output
+    const ndlocrProc = Bun.spawn(["ndlocr-lite", pngPath, "-o", ocrOutputDir], {
       stdout: "ignore",
       stderr: "pipe",
     });
@@ -107,12 +107,12 @@ export async function recognizeText(svgContent: Buffer): Promise<string> {
     ]);
     if (ndlocrExit === "timeout") {
       ndlocrProc.kill();
-      console.error("ndlocr timed out");
+      console.error("ndlocr-lite timed out");
       return "";
     }
     if (ndlocrExit !== 0) {
       const stderr = await new Response(ndlocrProc.stderr).text();
-      console.error(`ndlocr failed (exit ${ndlocrExit}): ${stderr}`);
+      console.error(`ndlocr-lite failed (exit ${ndlocrExit}): ${stderr}`);
       return "";
     }
 
