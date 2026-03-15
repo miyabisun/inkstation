@@ -8,3 +8,4 @@ inkstation-data/
 .vite/
 .env
 .env.*
+docker-compose.override.yml

@@ -28,8 +28,7 @@ export async function parseNdlocrOutput(outputDir: string): Promise<string> {
   let entries: string[];
   try {
     entries = await readdir(outputDir, { recursive: true }) as unknown as string[];
-  } catch (e) {
-    console.error("Failed to read OCR output directory:", e);
+  } catch {
     return "";
   }
 

@@ -15,6 +15,7 @@ import type {
 const MAX_SVG_LENGTH = 2 * 1024 * 1024; // 2MB base64
 
 function send(ws: ServerWebSocket, msg: ServerMessage): void {
+  if (ws.readyState >= 2) return;
   ws.send(JSON.stringify(msg));
 }
 
@@ -38,8 +39,7 @@ export async function handleWsMessage(
   let msg: Record<string, unknown>;
   try {
     msg = JSON.parse(message);
-  } catch (e) {
-    console.error("Failed to parse WebSocket message:", e);
+  } catch {
     send(ws, { type: "error", message: "Invalid JSON" });
     return;
   }
@@ -247,21 +247,19 @@ export async function handleWsMessage(
               const editPageYaml = await storage.savePage(date, freshPage);
               history.appendLog(date, "edit-row", { rowId, action: capturedAction }, editPageYaml);
 
-              try {
-                send(ws, {
-                  type: "ocr-result",
-                  id,
-                  date,
-                  rowId,
-                  action: capturedAction,
-                  ocrText,
-                });
-              } catch (e) { console.error("Failed to send ocr-result (ws closed?):", e); }
+              send(ws, {
+                type: "ocr-result",
+                id,
+                date,
+                rowId,
+                action: capturedAction,
+                ocrText,
+              });
             } finally {
               innerRelease();
             }
           })
-          .catch(console.error);
+          .catch(() => {});
       } finally {
         release();
       }

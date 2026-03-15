@@ -186,8 +186,7 @@ class WsClient {
       const raw = localStorage.getItem(QUEUE_KEY);
       if (!raw) return [];
       return JSON.parse(raw);
-    } catch (e) {
-      console.warn("Failed to read message queue:", e);
+    } catch {
       return [];
     }
   }

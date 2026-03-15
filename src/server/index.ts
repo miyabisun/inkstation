@@ -32,9 +32,9 @@ Bun.serve({
     message(ws, message) {
       handleWsMessage(ws, String(message), storage, history, mutex, cache).catch((err) => {
         console.error("WebSocket message handler error:", err);
-        try {
+        if (ws.readyState < 2) {
           ws.send(JSON.stringify({ type: "error", message: "Internal server error" }));
-        } catch (e) { console.error("Failed to send error response (ws closed?):", e); }
+        }
       });
     },
     open(ws) {

@@ -1,6 +1,6 @@
 services:
   inkstation:
-    build: .
+    image: ghcr.io/miyabi/inkstation:latest
     ports:
       - "3000:3000"
     volumes:
